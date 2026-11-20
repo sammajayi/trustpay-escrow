@@ -329,6 +329,113 @@ export async function invokeSorobanMethod(options: {
 /**
  * Creates an on-chain escrow project and locks the milestone funds into the Soroban contract.
  */
+export interface CreateProjectArgsParams {
+  clientAddress: string;
+  freelancerAddress?: string;
+  arbiterAddress?: string;
+  tokenAddress?: string;
+  milestoneAmounts: number[];
+  yieldEnabled?: boolean;
+}
+
+/** Parameter names of the escrow contract's `create_project`, in call order. */
+export const CREATE_PROJECT_ARG_NAMES = [
+  'client',
+  'freelancer',
+  'arbiter',
+  'token',
+  'milestone_amounts',
+  'yield_enabled',
+] as const;
+
+/** Escrow amounts are i128 values scaled to 7 decimals (stroops). */
+export const AMOUNT_SCALE = 10_000_000;
+
+/**
+ * Build the ScVal arguments for `create_project`. Shared by the live wallet
+ * flow and the DAO proposal generator so the proposed calldata is exactly what
+ * the app would submit itself.
+ */
+export function buildCreateProjectArgs(params: CreateProjectArgsParams): xdr.ScVal[] {
+  const {
+    clientAddress,
+    freelancerAddress,
+    arbiterAddress = DEFAULT_ARBITER_ADDRESS,
+    tokenAddress = SUPPORTED_TOKENS.USDC.issuerOrContractAddress,
+    milestoneAmounts,
+    yieldEnabled = false,
+  } = params;
+
+  // Build Soroban ScVal vector of milestone amounts (scaled to 7 decimals / 10^7 stroops)
+  const milestoneScVals = milestoneAmounts.map((amt) =>
+    nativeToScVal(BigInt(Math.round(amt * AMOUNT_SCALE)), { type: 'i128' })
+  );
+
+  const freelancerScVal = freelancerAddress
+    ? Address.fromString(freelancerAddress).toScVal()
+    : xdr.ScVal.scvVoid();
+
+  return [
+    Address.fromString(clientAddress).toScVal(),
+    freelancerScVal,
+    Address.fromString(arbiterAddress).toScVal(),
+    Address.fromString(tokenAddress).toScVal(),
+    xdr.ScVal.scvVec(milestoneScVals),
+    nativeToScVal(Boolean(yieldEnabled), { type: 'bool' }),
+  ];
+}
+
+export interface EncodedInvocationArg {
+  name: string;
+  /** Human-readable value (addresses, decimal amounts). */
+  value: string;
+  /** Base64 XDR of the ScVal. */
+  xdr: string;
+}
+
+export interface SorobanInvocationPayload {
+  contractId: string;
+  functionName: string;
+  args: EncodedInvocationArg[];
+  /** Base64 XDR of the InvokeContract host function, ready for a governance executor. */
+  hostFunctionXdr: string;
+}
+
+/**
+ * Encode a `create_project` invocation as governance-ready calldata: each
+ * argument as base64 ScVal XDR, plus the complete InvokeContract host function.
+ * Pure: it never touches the network or a wallet.
+ */
+export function encodeCreateProjectInvocation(
+  params: CreateProjectArgsParams & { contractAddress?: string }
+): SorobanInvocationPayload {
+  const contractId = params.contractAddress || DEFAULT_ESCROW_CONTRACT_ID;
+  const args = buildCreateProjectArgs(params);
+  const values = [
+    params.clientAddress,
+    params.freelancerAddress || 'None',
+    params.arbiterAddress || DEFAULT_ARBITER_ADDRESS,
+    params.tokenAddress || SUPPORTED_TOKENS.USDC.issuerOrContractAddress,
+    `[${params.milestoneAmounts.join(', ')}]`,
+    String(Boolean(params.yieldEnabled)),
+  ];
+  const invokeArgs = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(contractId).toScAddress(),
+    functionName: 'create_project',
+    args,
+  });
+  return {
+    contractId,
+    functionName: 'create_project',
+    args: args.map((arg, i) => ({
+      name: CREATE_PROJECT_ARG_NAMES[i],
+      value: values[i],
+      xdr: arg.toXDR('base64'),
+    })),
+    hostFunctionXdr: xdr.HostFunction.hostFunctionTypeInvokeContract(invokeArgs).toXDR('base64'),
+  };
+}
+
 export async function createProjectOnChain(params: {
   clientAddress: string;
   freelancerAddress?: string;
@@ -339,34 +446,9 @@ export async function createProjectOnChain(params: {
   contractAddress?: string;
   onStatusUpdate?: TxStatusCallback;
 }): Promise<{ success: boolean; txHash: string; onChainProjectId: number | bigint }> {
-  const {
-    clientAddress,
-    freelancerAddress,
-    arbiterAddress = DEFAULT_ARBITER_ADDRESS,
-    tokenAddress = SUPPORTED_TOKENS.USDC.issuerOrContractAddress,
-    milestoneAmounts,
-    yieldEnabled = false,
-    contractAddress,
-    onStatusUpdate,
-  } = params;
+  const { clientAddress, contractAddress, onStatusUpdate } = params;
 
-  // Build Soroban ScVal vector of milestone amounts (scaled to 7 decimals / 10^7 stroops)
-  const milestoneScVals = milestoneAmounts.map((amt) =>
-    nativeToScVal(BigInt(Math.round(amt * 10_000_000)), { type: 'i128' })
-  );
-
-  const freelancerScVal = freelancerAddress
-    ? Address.fromString(freelancerAddress).toScVal()
-    : xdr.ScVal.scvVoid();
-
-  const args: xdr.ScVal[] = [
-    Address.fromString(clientAddress).toScVal(),
-    freelancerScVal,
-    Address.fromString(arbiterAddress).toScVal(),
-    Address.fromString(tokenAddress).toScVal(),
-    xdr.ScVal.scvVec(milestoneScVals),
-    nativeToScVal(Boolean(yieldEnabled), { type: 'bool' }),
-  ];
+  const args = buildCreateProjectArgs(params);
 
   const result = await invokeSorobanMethod({
     callerAddress: clientAddress,

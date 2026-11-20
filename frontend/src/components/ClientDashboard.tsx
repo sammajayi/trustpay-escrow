@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import NumberRoll from './NumberRoll';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
@@ -13,6 +13,7 @@ import { ImageLightboxModal } from './ImageLightboxModal';
 import { ApplicantCard, type ApplicantCardData } from './ApplicantCard';
 import { FreelancerProfileModal } from './FreelancerProfileModal';
 import { ProjectChatModal } from './ProjectChatModal';
+import { DaoProposalGeneratorModal } from './DaoProposalGeneratorModal';
 import { ProjectCardSkeletonList } from '@/components/skeletons';
 import { SUPPORTED_TOKENS } from '@/config/tokens';
 import { useTokenBalance, useTokenBalances, getBalanceShortfall } from '@/hooks/useCreateProjectForm';
@@ -157,6 +158,39 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
 
   // Milestones list for form (initialized as empty)
   const [formMilestones, setFormMilestones] = useState<Milestone[]>([]);
+  const [showDaoProposal, setShowDaoProposal] = useState(false);
+
+  // Escrow terms handed to the DAO proposal generator, mirroring what the
+  // on-chain create flow would submit (milestones, or one tranche for the budget).
+  const daoProposalDefaults = useMemo(
+    () => ({
+      projectTitle: formTitle.trim(),
+      description: formDescription,
+      category: formCategory === 'Other' ? customCategory.trim() || 'Other' : formCategory,
+      token: formToken,
+      tokenAddress: SUPPORTED_TOKENS[formToken]?.issuerOrContractAddress ?? '',
+      freelancerAddress: formFreelancerAddress.trim(),
+      milestones:
+        formMilestones.length > 0
+          ? formMilestones.map((m) => ({ title: m.title, amount: Number(m.amount), due_date: m.due_date }))
+          : [{ title: 'Full project', amount: Number(formBudget) || 0 }],
+      yieldEnabled: formYieldEnabled,
+      deadline: formDeadline || undefined,
+    }),
+    [
+      formTitle,
+      formDescription,
+      formCategory,
+      customCategory,
+      formToken,
+      formFreelancerAddress,
+      formMilestones,
+      formBudget,
+      formYieldEnabled,
+      formDeadline,
+    ]
+  );
+  const canGenerateDaoProposal = formTitle.trim().length > 0 && Number(formBudget) > 0;
 
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDescription, setNewMilestoneDescription] = useState('');
@@ -1770,6 +1804,15 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                   </p>
                 )}
                 <button
+                  type="button"
+                  onClick={() => setShowDaoProposal(true)}
+                  disabled={!canGenerateDaoProposal}
+                  title={canGenerateDaoProposal ? undefined : 'Add a title and budget first'}
+                  className="px-6 py-3 bg-[#232326] hover:bg-[#2c2c30] text-white font-bold text-xs sm:text-sm rounded-xl border border-[#333338] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Generate DAO Proposal 🗳️
+                </button>
+                <button
                   type="submit"
                   disabled={isSubmitting || hasInsufficientBalance}
                   aria-label="Lock Funds & Create Escrow"
@@ -1784,6 +1827,11 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                 </button>
               </div>
             </form>
+            <DaoProposalGeneratorModal
+              isOpen={showDaoProposal}
+              onClose={() => setShowDaoProposal(false)}
+              defaults={daoProposalDefaults}
+            />
           </div>
         )}
 
