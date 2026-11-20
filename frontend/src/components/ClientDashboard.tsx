@@ -17,6 +17,7 @@ import { BalanceWarningBadge } from '@/components/BalanceWarningBadge';
 import { ProjectAuditLog } from '@/components/ProjectAuditLog';
 import { CalendarExportButton } from '@/components/CalendarExportButton';
 import { DownloadReceiptButton } from '@/components/DownloadReceiptButton';
+import { ShareMilestoneButton } from '@/components/ShareableMilestoneCard';
 import {
   createProjectOnChain,
   lockEscrowOnChain,
@@ -734,6 +735,7 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                       {(proj.status === 'completed' || (proj.status as string) === 'Completed') && (
                         <DownloadReceiptButton project={proj} />
                       )}
+                      <ShareMilestoneButton project={proj} />
                     </div>
                   </div>
                 ))}
