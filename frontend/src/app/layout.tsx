@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/sonner';
 import { ThemeProvider } from 'next-themes';
+import { PerformanceTelemetryButton } from '@/components/PerformanceTelemetryModal';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -49,6 +50,7 @@ export default function RootLayout({
         <ThemeProvider attribute="data-theme" defaultTheme="system" enableSystem storageKey="theme">
           {children}
           <Toaster />
+          <PerformanceTelemetryButton />
         </ThemeProvider>
       </body>
     </html>
