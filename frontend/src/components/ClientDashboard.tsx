@@ -34,6 +34,7 @@ import { AccountsPayableExportModal } from '@/components/AccountsPayableExportMo
 import { GasFeeEstimatorWidget } from '@/components/GasFeeEstimatorWidget';
 import { BlendYieldVisualizer } from '@/components/BlendYieldVisualizer';
 import { BLEND_ALLOCATION_RATIO } from '@/lib/blend-yield';
+import { ShareMilestoneButton } from '@/components/ShareableMilestoneCard';
 import {
   createProjectOnChain,
   lockEscrowOnChain,
@@ -1110,6 +1111,7 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                       {(proj.status === 'completed' || (proj.status as string) === 'Completed') && (
                         <DownloadReceiptButton project={proj} />
                       )}
+                      <ShareMilestoneButton project={proj} />
                     </div>
                   </div>
                 ))}
