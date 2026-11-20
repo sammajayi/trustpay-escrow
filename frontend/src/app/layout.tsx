@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { ThemeProvider } from 'next-themes';
 import { NetworkMismatchBanner } from '@/components/NetworkMismatchBanner';
 import { CommandPalette } from '@/components/CommandPalette';
+import { PerformanceTelemetryButton } from '@/components/PerformanceTelemetryModal';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -102,6 +103,7 @@ export default function RootLayout({
           {children}
           <Toaster />
           <CommandPalette />
+          <PerformanceTelemetryButton />
         </ThemeProvider>
       </body>
     </html>
