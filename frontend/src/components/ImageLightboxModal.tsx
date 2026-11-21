@@ -2,15 +2,27 @@
 
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AnnotatedEvidence, EvidenceAnnotationCanvas } from './EvidenceAnnotationCanvas';
 
 interface ImageLightboxModalProps {
   imageUrl: string | null;
   imageAlt?: string;
   onClose: () => void;
+  /**
+   * When provided, an "Annotate & Redact" action appears. The sanitized,
+   * flattened PNG is handed to this callback; the original is never modified.
+   */
+  onAnnotatedExport?: (result: AnnotatedEvidence) => void;
 }
 
-export function ImageLightboxModal({ imageUrl, imageAlt = 'Project File Attachment', onClose }: ImageLightboxModalProps) {
+export function ImageLightboxModal({
+  imageUrl,
+  imageAlt = 'Project File Attachment',
+  onClose,
+  onAnnotatedExport,
+}: ImageLightboxModalProps) {
   const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [annotating, setAnnotating] = useState(false);
 
   if (!imageUrl) return null;
 
@@ -57,6 +69,16 @@ export function ImageLightboxModal({ imageUrl, imageAlt = 'Project File Attachme
           >
             🔍 +
           </button>
+          {onAnnotatedExport && !annotating && (
+            <button
+              type="button"
+              onClick={() => setAnnotating(true)}
+              className="px-3 py-2 bg-[#232326] hover:bg-[#27272a] text-white rounded-xl border border-[#333338] text-xs font-bold transition-all"
+              title="Highlight defects or black out sensitive details"
+            >
+              ✏️ Annotate &amp; Redact
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -70,13 +92,27 @@ export function ImageLightboxModal({ imageUrl, imageAlt = 'Project File Attachme
 
       {/* Main Zoomable Image Stage */}
       <div className="flex-1 w-full flex items-center justify-center overflow-auto p-4 relative my-auto">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageUrl}
-          alt={imageAlt}
-          style={{ transform: `scale(${zoomLevel})` }}
-          className="max-h-[78vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl transition-transform duration-200 ease-out border border-[#333338] select-none"
-        />
+        {annotating && onAnnotatedExport ? (
+          <div className="w-full max-w-5xl">
+            <EvidenceAnnotationCanvas
+              imageSrc={imageUrl}
+              fileName={imageAlt}
+              onExport={(result) => {
+                onAnnotatedExport(result);
+                setAnnotating(false);
+              }}
+              onCancel={() => setAnnotating(false)}
+            />
+          </div>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={imageUrl}
+            alt={imageAlt}
+            style={{ transform: `scale(${zoomLevel})` }}
+            className="max-h-[78vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl transition-transform duration-200 ease-out border border-[#333338] select-none"
+          />
+        )}
       </div>
 
       {/* Footer Helper Text */}
