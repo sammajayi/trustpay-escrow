@@ -8,6 +8,8 @@ import { nativeToScVal, xdr } from '@stellar/stellar-sdk';
 
 import { Milestone, Project } from '@/types';
 import { ImageLightboxModal } from '@/components/ImageLightboxModal';
+import { DisputeEvidenceAttachments } from '@/components/DisputeEvidenceAttachments';
+import { downloadBlob } from '@/lib/share-card';
 import { ProjectDetailSkeleton } from '@/components/skeletons';
 import { ProjectAuditLog } from '@/components/ProjectAuditLog';
 import { CalendarExportButton } from '@/components/CalendarExportButton';
@@ -1485,6 +1487,7 @@ export default function ProjectDetailsPage() {
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-red-500"
                 />
               </div>
+              <DisputeEvidenceAttachments />
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
@@ -1632,6 +1635,10 @@ export default function ProjectDetailsPage() {
           imageUrl={lightboxImage.url}
           imageAlt={lightboxImage.name}
           onClose={() => setLightboxImage(null)}
+          onAnnotatedExport={({ blob, filename }) => {
+            downloadBlob(blob, filename);
+            toast.success('Sanitized copy downloaded');
+          }}
         />
       )}
 
