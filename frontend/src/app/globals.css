@@ -123,3 +123,29 @@ button {
 .animate-skeleton-pulse {
   animation: skeleton-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Hero CTA ambient radial pulse & particle shimmer ring */
+@keyframes hero-glow-pulse {
+  0%, 100% {
+    opacity: 0.65;
+    transform: scale(1);
+    filter: blur(14px);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.05);
+    filter: blur(18px);
+  }
+}
+
+.animate-hero-glow {
+  animation: hero-glow-pulse 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-hero-glow {
+    animation: none;
+    opacity: 0.75;
+    filter: blur(12px);
+  }
+}
