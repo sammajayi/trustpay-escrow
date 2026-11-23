@@ -1,5 +1,6 @@
 import {
   rpc,
+  Account,
   Address,
   nativeToScVal,
   scValToNative,
@@ -10,6 +11,7 @@ import {
 } from '@stellar/stellar-sdk';
 import { signTransaction, isConnected } from '@stellar/freighter-api';
 import { SUPPORTED_TOKENS } from '@/config/tokens';
+import { parseFeeStats, type HorizonFeeStats, type NetworkFees } from '@/lib/fee-estimator';
 
 export const SOROBAN_RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
@@ -35,6 +37,85 @@ export function getSorobanRpcServer(): rpc.Server {
   return new rpc.Server(SOROBAN_RPC_URL, {
     allowHttp: SOROBAN_RPC_URL.startsWith('http://'),
   });
+}
+
+export interface AmmPoolReserveSnapshot {
+  reserveBase: number;
+  reserveQuote: number;
+}
+
+function readReserveAmount(value: unknown): number {
+  if (typeof value === 'bigint') return Number(value);
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+}
+
+export function parseAmmReserves(value: unknown, reserveDecimals = 7): AmmPoolReserveSnapshot {
+  const scale = 10 ** Math.max(0, Number.isFinite(reserveDecimals) ? reserveDecimals : 7);
+  let rawBase: unknown;
+  let rawQuote: unknown;
+
+  if (Array.isArray(value)) {
+    rawBase = value[0];
+    rawQuote = value[1];
+  } else if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    rawBase = record.reserveBase ?? record.reserve_base ?? record.reserveA ?? record.reserve_a ?? record.base ?? record[0];
+    rawQuote = record.reserveQuote ?? record.reserve_quote ?? record.reserveB ?? record.reserve_b ?? record.quote ?? record[1];
+  }
+
+  const reserveBase = readReserveAmount(rawBase) / scale;
+  const reserveQuote = readReserveAmount(rawQuote) / scale;
+  if (reserveBase <= 0 || reserveQuote <= 0) {
+    throw new Error('AMM pool returned invalid reserve values.');
+  }
+  return { reserveBase, reserveQuote };
+}
+
+/**
+ * Simulates a read-only `get_reserves` call against a constant-product AMM pool contract.
+ */
+export async function fetchAmmPoolReserves(options: {
+  contractAddress: string;
+  sourceAccount?: string;
+  reserveDecimals?: number;
+  functionName?: string;
+}): Promise<AmmPoolReserveSnapshot> {
+  const {
+    contractAddress,
+    sourceAccount = DEFAULT_ARBITER_ADDRESS,
+    reserveDecimals = 7,
+    functionName = 'get_reserves',
+  } = options;
+  if (!contractAddress) {
+    throw new Error('No AMM pool contract is configured for this token pair.');
+  }
+
+  const server = getSorobanRpcServer();
+  const account = new Account(sourceAccount, '0');
+  const transaction = new TransactionBuilder(account, {
+    fee: '10000',
+    networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.invokeContractFunction({
+        contract: contractAddress,
+        function: functionName,
+        args: [],
+      })
+    )
+    .setTimeout(30)
+    .build();
+
+  const simulation = await server.simulateTransaction(transaction);
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw new Error(`AMM pool simulation failed: ${simulation.error}`);
+  }
+  const returnValue = simulation.result?.retval;
+  if (!returnValue) {
+    throw new Error('AMM pool simulation returned no reserve data.');
+  }
+  return parseAmmReserves(scValToNative(returnValue), reserveDecimals);
 }
 
 /**
@@ -83,6 +164,30 @@ export interface SorobanTxResult {
   error?: string;
 }
 
+/** Inclusion fee used when no speed preset has been selected, in stroops. */
+export const DEFAULT_SOROBAN_BASE_FEE = 100000;
+
+let selectedBaseFee: number | null = null;
+
+/**
+ * Sets the inclusion fee (stroops) applied to every Soroban invocation envelope
+ * built by `invokeSorobanMethod`. Pass `null` to go back to the default (#256).
+ */
+export function setSorobanBaseFee(stroops: number | null): void {
+  selectedBaseFee = stroops !== null && Number.isFinite(stroops) && stroops >= 100 ? Math.ceil(stroops) : null;
+}
+
+export function getSorobanBaseFee(): number | null {
+  return selectedBaseFee;
+}
+
+/** Fetches current fee statistics (last 5 ledgers) from Horizon (#256). */
+export async function fetchHorizonFeeStats(horizonUrl: string = HORIZON_URL): Promise<NetworkFees> {
+  const response = await fetch(`${horizonUrl.replace(/\/+$/, '')}/fee_stats`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Horizon fee_stats responded with ${response.status}`);
+  return parseFeeStats((await response.json()) as HorizonFeeStats);
+}
+
 /**
  * Generalized Soroban smart contract invoker:
  * 1. Validates Freighter wallet extension
@@ -98,8 +203,11 @@ export async function invokeSorobanMethod(options: {
   functionName: string;
   args: xdr.ScVal[];
   onStatusUpdate?: TxStatusCallback;
+  /** Inclusion (base) fee in stroops. Defaults to the fee chosen in the gas estimator (#256). */
+  baseFee?: number | string;
 }): Promise<SorobanTxResult> {
   const { callerAddress, functionName, args, onStatusUpdate } = options;
+  const inclusionFee = String(options.baseFee ?? getSorobanBaseFee() ?? DEFAULT_SOROBAN_BASE_FEE);
   const targetContract = options.contractAddress || DEFAULT_ESCROW_CONTRACT_ID;
 
   onStatusUpdate?.('preparing', 'Validating wallet connection and account status...');
@@ -119,7 +227,7 @@ export async function invokeSorobanMethod(options: {
 
   // 3. Build un-simulated Soroban transaction
   const baseTx = new TransactionBuilder(sourceAccount, {
-    fee: '100000',
+    fee: inclusionFee,
     networkPassphrase: STELLAR_NETWORK_PASSPHRASE,
   })
     .addOperation(
@@ -750,4 +858,175 @@ export async function autoReleaseMilestoneOnChain(params: {
     onStatusUpdate,
   });
 }
+
+/**
+ * Executes a mutual (non-dispute) project cancellation once both client and
+ * freelancer have agreed on a refund split. Broadcasts `mutual_cancel`.
+ */
+export async function mutualCancelOnChain(params: {
+  callerAddress: string;
+  projectIdOnChain: number | bigint | string;
+  clientRefundAmount: number;
+  freelancerCompensation: number;
+  contractAddress?: string;
+  onStatusUpdate?: TxStatusCallback;
+}): Promise<SorobanTxResult> {
+  const {
+    callerAddress,
+    projectIdOnChain,
+    clientRefundAmount,
+    freelancerCompensation,
+    contractAddress,
+    onStatusUpdate,
+  } = params;
+
+  const args: xdr.ScVal[] = [
+    Address.fromString(callerAddress).toScVal(),
+    nativeToScVal(BigInt(projectIdOnChain), { type: 'u64' }),
+    nativeToScVal(BigInt(Math.round(clientRefundAmount * 10_000_000)), { type: 'i128' }),
+    nativeToScVal(BigInt(Math.round(freelancerCompensation * 10_000_000)), { type: 'i128' }),
+  ];
+
+  return invokeSorobanMethod({
+    callerAddress,
+    contractAddress,
+    functionName: 'mutual_cancel',
+    args,
+    onStatusUpdate,
+  });
+}
+
+/**
+ * Verified open-source repository hosting the audited Soroban contract source.
+ */
+export const OFFICIAL_CONTRACT_REPO_URL =
+  'https://github.com/trustpay-escrow/trustpay-escrow/tree/main/contracts';
+
+/**
+ * Expected SHA-256 (WASM hash) of the official release build artifact.
+ * Configure via NEXT_PUBLIC_ESCROW_WASM_SHA256 once a release is published.
+ */
+export const EXPECTED_WASM_SHA256 = (
+  process.env.NEXT_PUBLIC_ESCROW_WASM_SHA256 || ''
+).toLowerCase();
+
+function xdrBufferToHex(buf: Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Queries the Soroban RPC for the deployed contract instance's WASM bytecode
+ * hash (the SHA-256 digest of the compiled contract WASM) via ledger entries.
+ */
+export async function getContractWasmHash(
+  contractAddress: string = DEFAULT_ESCROW_CONTRACT_ID
+): Promise<string> {
+  const server = getSorobanRpcServer();
+
+  const result = await server.getContractData(
+    contractAddress,
+    xdr.ScVal.scvSymbol('ContractInstance'),
+    rpc.Durability.Persistent
+  );
+
+  const data = result.val;
+  if (data.switch().name !== 'contractData') {
+    throw new Error('Contract instance ledger entry not found.');
+  }
+
+  const instanceVal = data.contractData().val();
+  if (instanceVal.switch().name !== 'scvContractInstance') {
+    throw new Error('Contract has no instance data on ledger.');
+  }
+
+  const executable = instanceVal.instance().executable();
+  if (executable.switch().name !== 'contractExecutableWasm') {
+    throw new Error('Contract executable is not an inline WASM hash.');
+  }
+
+  return xdrBufferToHex(executable.wasmHash());
+}
+
+import { decodeSorobanError, DecodedSorobanError } from './soroban-error-decoder';
+import { showSorobanErrorToast } from '@/components/SorobanErrorToast';
+export type FeeSpeedTier = 'standard' | 'fast' | 'urgent';
+
+export interface FeeTierDetails {
+  feeStroops: number;
+  multiplier: number;
+  estimatedTimeSec: number;
+}
+
+export interface NetworkFeeStats {
+  baseFeeStroops: number;
+  surgeMultiplier: number;
+  isSurgeActive: boolean;
+  ledgerCapacityUsage: number;
+  tiers: {
+    standard: FeeTierDetails;
+    fast: FeeTierDetails;
+    urgent: FeeTierDetails;
+  };
+}
+
+export function calculateFeeTiers(baseFeeStroops: number, surgeMultiplier: number = 1.0): NetworkFeeStats['tiers'] {
+  const effectiveBase = Math.max(100, Math.round(baseFeeStroops * surgeMultiplier));
+  return {
+    standard: {
+      feeStroops: effectiveBase,
+      multiplier: 1.0,
+      estimatedTimeSec: 3,
+    },
+    fast: {
+      feeStroops: Math.round(effectiveBase * 1.5),
+      multiplier: 1.5,
+      estimatedTimeSec: 2,
+    },
+    urgent: {
+      feeStroops: Math.round(effectiveBase * 2.0),
+      multiplier: 2.0,
+      estimatedTimeSec: 1,
+    },
+  };
+}
+
+export async function fetchStellarFeeStats(): Promise<NetworkFeeStats> {
+  const fallbackBase = 100;
+  try {
+    const res = await fetch(`${HORIZON_URL}/fee_stats`);
+    if (!res.ok) {
+      return {
+        baseFeeStroops: fallbackBase,
+        surgeMultiplier: 1.0,
+        isSurgeActive: false,
+        ledgerCapacityUsage: 0.1,
+        tiers: calculateFeeTiers(fallbackBase),
+      };
+    }
+    const data = await res.json();
+    const modeFee = Number(data?.fee_charged?.mode || data?.min_accepted_fee || fallbackBase);
+    const capacityUsage = Number(data?.ledger_capacity_usage || 0);
+    const isSurge = capacityUsage > 0.85;
+    const surgeMultiplier = isSurge ? 1.3 : 1.0;
+    return {
+      baseFeeStroops: modeFee,
+      surgeMultiplier,
+      isSurgeActive: isSurge,
+      ledgerCapacityUsage: capacityUsage,
+      tiers: calculateFeeTiers(modeFee, surgeMultiplier),
+    };
+  } catch {
+    return {
+      baseFeeStroops: fallbackBase,
+      surgeMultiplier: 1.0,
+      isSurgeActive: false,
+      ledgerCapacityUsage: 0.1,
+      tiers: calculateFeeTiers(fallbackBase),
+    };
+  }
+}
+
 

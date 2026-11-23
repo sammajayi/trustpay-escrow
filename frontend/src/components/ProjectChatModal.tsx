@@ -1,10 +1,13 @@
 'use client';
 
+import { useEscapeKey } from '@/hooks/useEscapeKey';
+
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { authFetch } from '@/lib/api';
 import { useWalletStore } from '@/store/walletStore';
 import { CryptoId } from '@/components/ui/CryptoId';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { MessageReactionBar } from '@/components/MessageReactionBar';
 
 export interface ChatMessage {
@@ -124,6 +127,8 @@ export function ProjectChatModal({
       scrollToBottom();
     }
   }, [messages, isOpen]);
+
+  useEscapeKey(onClose, isOpen);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

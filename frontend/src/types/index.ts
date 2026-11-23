@@ -16,6 +16,7 @@ export interface Milestone {
   deliverable_url?: string;
   deliverable_notes?: string;
   deliverable_type?: string;
+  tx_hash?: string;
 }
 
 export interface Project {
@@ -60,9 +61,11 @@ export interface Applicant {
   pitch: string;
   cover_note?: string;
   portfolio_url?: string;
+  demo_url?: string;
   status?: 'pending' | 'accepted' | 'denied' | 'granted' | 'rejected';
   granted?: boolean;
   created_at?: string;
+  zk_attestation?: unknown;
 }
 
 export interface Proposal {

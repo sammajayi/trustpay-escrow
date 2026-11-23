@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import NumberRoll from './NumberRoll';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
-import { useWalletStore } from '@/store/walletStore';
+import { useWalletStore, canSubmitProposal } from '@/store/walletStore';
 import { authFetch } from '@/lib/api';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 
 import { Milestone, Project, Proposal } from '@/types';
 import { ImageLightboxModal } from './ImageLightboxModal';
@@ -15,11 +17,17 @@ import { DownloadReceiptButton } from '@/components/DownloadReceiptButton';
 import { ShareMilestoneButton } from '@/components/ShareableMilestoneCard';
 import { ProjectFilterBar } from '@/components/ProjectFilterBar';
 import { CryptoId } from '@/components/ui/CryptoId';
+import { usePersistentTab, usePersistentFilter } from '@/hooks/usePersistentTab';
 
 export function FreelancerDashboard() {
   const router = useRouter();
-  const { address } = useWalletStore();
-  const [activeTab, setActiveTab] = useState<'explore' | 'proposals' | 'jobs'>('explore');
+  const { address, activeRole } = useWalletStore();
+  const [activeTab, setActiveTab] = usePersistentTab<'explore' | 'proposals' | 'jobs'>({
+    key: 'freelancer_active_tab',
+    defaultTab: 'explore',
+    allowedTabs: ['explore', 'proposals', 'jobs'] as const,
+    walletAddress: address,
+  });
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -55,9 +63,9 @@ export function FreelancerDashboard() {
   // Milestone submission modal state
   const [submittingMilestone, setSubmittingMilestone] = useState<{ project: Project; milestone: Milestone } | null>(null);
 
-  // Search and Category filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  // Search and Category filters (persisted in sessionStorage)
+  const [searchQuery, setSearchQuery] = usePersistentFilter<string>('freelancer_search', '', address);
+  const [selectedCategory, setSelectedCategory] = usePersistentFilter<string>('freelancer_category', 'All', address);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -66,6 +74,11 @@ export function FreelancerDashboard() {
 
   // Open Apply Modal and pre-fill wallet address
   const handleOpenApplyModal = (proj: Project) => {
+    const check = canSubmitProposal(proj, address, activeRole);
+    if (!check.allowed) {
+      toast.error(check.reason || 'You cannot apply to your own escrow');
+      return;
+    }
     setSelectedProject(proj);
     setProposalWalletAddress(address || '');
     setProposalCoverNote('');
@@ -100,6 +113,22 @@ export function FreelancerDashboard() {
 
   // Helper to render action button or status badge for a project
   const renderProjectActionBadge = (proj: Project, isModal = false) => {
+    const clientAddr = proj.client_address || (proj as any).client?.stellar_address || (proj as any).client;
+    const isOwnProject = Boolean(clientAddr && address && clientAddr.toLowerCase() === address.toLowerCase());
+    if (isOwnProject) {
+      return (
+        <span
+          data-testid="own-project-badge"
+          className={
+            isModal
+              ? "px-5 py-2.5 bg-[#27272a] text-[#a1a1aa] border border-[#3f3f46] text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-md cursor-not-allowed"
+              : "px-3.5 py-1.5 bg-[#27272a] text-[#a1a1aa] border border-[#3f3f46] text-xs font-semibold rounded-xl flex items-center gap-1 cursor-not-allowed"
+          }
+        >
+          <span>Owner (Client)</span>
+        </span>
+      );
+    }
     const existingProposal = proposals.find((p) => p.project_id === proj.id) ||
       (proj.applicants || []).find((a: any) => a.stellar_address === address || a.freelancer_address === address) ||
       (proj.proposals || []).find((p: any) => p.freelancer_address === address || p.stellar_address === address);
@@ -317,6 +346,12 @@ export function FreelancerDashboard() {
 
     if (!selectedProject) return;
 
+    const check = canSubmitProposal(selectedProject, address, activeRole);
+    if (!check.allowed) {
+      toast.error(check.reason || 'You cannot apply to your own escrow');
+      return;
+    }
+
     setIsSubmittingProposal(true);
 
     try {
@@ -367,6 +402,9 @@ export function FreelancerDashboard() {
     }
   };
 
+  useEscapeKey(() => setViewingProjectDetails(null), Boolean(viewingProjectDetails));
+  useEscapeKey(() => setSelectedProject(null), Boolean(selectedProject));
+
   return (
     <div className="w-full min-h-screen bg-[#121212] text-[#f4f4f5] font-sans p-3 sm:p-6 md:p-10 transition-colors duration-200">
       <div className="max-w-4xl mx-auto space-y-5 sm:space-y-6">
@@ -407,7 +445,7 @@ export function FreelancerDashboard() {
                   : 'text-[#a1a1aa] hover:text-white hover:bg-[#27272a]/50'
               }`}
             >
-              My Proposals ({proposals.length})
+              My Proposals (<NumberRoll value={proposals.length} />)
             </button>
           </div>
         </div>
@@ -416,11 +454,38 @@ export function FreelancerDashboard() {
         {activeTab === 'explore' && (
           <div className="bg-[#18181b] border border-[#27272a] rounded-2xl p-4 sm:p-6 md:p-8 shadow-2xl space-y-5 sm:space-y-6">
             
+            {/* Dashboard Statistic Cards with Smooth NumberRoll Counter */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="bg-[#121214] border border-[#27272a] rounded-xl p-4">
+                <div className="text-xs text-[#a1a1aa] font-medium">Total Volume</div>
+                <div className="text-xl sm:text-2xl font-black text-white mt-1">
+                  <NumberRoll
+                    value={projects.reduce((sum, p) => sum + (Number(p.budget) || 0), 0)}
+                    prefix="$"
+                    decimals={0}
+                  />
+                </div>
+              </div>
+              <div className="bg-[#121214] border border-[#27272a] rounded-xl p-4">
+                <div className="text-xs text-[#a1a1aa] font-medium">Active Escrows</div>
+                <div className="text-xl sm:text-2xl font-black text-indigo-400 mt-1">
+                  <NumberRoll value={projects.length} />
+                </div>
+              </div>
+              <div className="bg-[#121214] border border-[#27272a] rounded-xl p-4">
+                <div className="text-xs text-[#a1a1aa] font-medium">Submitted Proposals</div>
+                <div className="text-xl sm:text-2xl font-black text-emerald-400 mt-1">
+                  <NumberRoll value={proposals.length} />
+                </div>
+              </div>
+            </div>
+
             {/* Header & Filter Controls */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
               <div>
-                <h2 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight text-white">
-                  Available Projects
+                <h2 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight text-white flex items-center gap-1.5">
+                  <span>Available Projects</span>
+                  <span className="text-xs font-normal text-[#a1a1aa]">(<NumberRoll value={filteredProjects.length} />)</span>
                 </h2>
                 <p className="text-[11px] sm:text-xs md:text-sm text-[#a1a1aa] mt-0.5">
                   Apply for open escrows and submit your milestones.

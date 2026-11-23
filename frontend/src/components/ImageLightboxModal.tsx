@@ -4,9 +4,10 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnnotatedEvidence, EvidenceAnnotationCanvas } from './EvidenceAnnotationCanvas';
 
-interface ImageLightboxModalProps {
+export interface ImageLightboxModalProps {
   imageUrl: string | null;
   imageAlt?: string;
+  isPdf?: boolean;
   onClose: () => void;
   /**
    * When provided, an "Annotate & Redact" action appears. The sanitized,
@@ -24,7 +25,11 @@ export function ImageLightboxModal({
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [annotating, setAnnotating] = useState(false);
 
+  useEscapeKey(onClose, Boolean(imageUrl));
+
   if (!imageUrl) return null;
+
+  const isPdfFile = isPdf || imageUrl.toLowerCase().endsWith('.pdf');
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.25, 3.5));
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 0.25, 0.5));
@@ -36,7 +41,7 @@ export function ImageLightboxModal({
       <div className="w-full max-w-5xl flex items-center justify-between z-10 pb-2 border-b border-[#27272a]">
         <div className="flex items-center space-x-2">
           <span className="text-xs font-bold text-white bg-[#232326] px-3 py-1 rounded-lg border border-[#333338]">
-            📷 {imageAlt}
+            {isPdfFile ? '📄 PDF Evidence' : '📷 Image Proof'}: {imageAlt}
           </span>
           <span className="text-xs text-[#a1a1aa] font-mono">
             {Math.round(zoomLevel * 100)}%
@@ -90,7 +95,7 @@ export function ImageLightboxModal({
         </div>
       </div>
 
-      {/* Main Zoomable Image Stage */}
+      {/* Main Zoomable Media Stage */}
       <div className="flex-1 w-full flex items-center justify-center overflow-auto p-4 relative my-auto">
         {annotating && onAnnotatedExport ? (
           <div className="w-full max-w-5xl">
@@ -117,10 +122,12 @@ export function ImageLightboxModal({
 
       {/* Footer Helper Text */}
       <div className="z-10 pt-2 text-center text-xs text-[#71717a]">
-        Use controls above to zoom in, zoom out, or reset view.
+        Use controls above to inspect, zoom in/out, or close the document preview.
       </div>
     </div>
   );
 
   return typeof window !== 'undefined' ? createPortal(modalJsx, document.body) : null;
 }
+
+export default ImageLightboxModal;
