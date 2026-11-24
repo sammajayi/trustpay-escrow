@@ -28,7 +28,7 @@ describe('ImageLightboxModal annotate mode', () => {
   it('does not offer annotation unless the caller opts in', () => {
     render(<ImageLightboxModal imageUrl={URL_} onClose={() => {}} />);
     expect(screen.queryByRole('button', { name: /Annotate/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Project File Attachment' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Evidence Document Attachment' })).toBeInTheDocument();
   });
 
   it('swaps the image for the editor, seeded with the image and its name', () => {
@@ -63,7 +63,7 @@ describe('ImageLightboxModal annotate mode', () => {
 
     expect(onAnnotatedExport).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
-    expect(screen.getByRole('img', { name: 'Project File Attachment' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Evidence Document Attachment' })).toBeInTheDocument();
   });
 
   it('keeps the existing close behaviour', () => {
