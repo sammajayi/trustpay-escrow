@@ -208,6 +208,13 @@ export function FreelancerDashboard() {
             >
               <span>💬 Chat with Client</span>
             </button>
+            {proj.milestones?.some((milestone) => milestone.status === 'approved') && (
+              <MilestoneCertificateButton
+                project={proj}
+                milestone={proj.milestones?.find((milestone) => milestone.status === 'approved')}
+                txHash={proj.tx_hash}
+              />
+            )}
             <DownloadReceiptButton project={proj} />
             <ShareMilestoneButton project={proj} />
             <span className={isModal 

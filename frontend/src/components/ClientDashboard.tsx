@@ -18,7 +18,7 @@ import { ProjectCardSkeletonList } from '@/components/skeletons';
 import { SUPPORTED_TOKENS } from '@/config/tokens';
 import { useTokenBalance, useTokenBalances, getBalanceShortfall } from '@/hooks/useCreateProjectForm';
 import { TokenSelector } from '@/components/TokenSelector';
-import { usePersistentTab } from '@/hooks/usePersistentTab';
+import { usePersistentTab, usePersistentFilter } from '@/hooks/usePersistentTab';
 import { BalanceWarningBadge } from '@/components/BalanceWarningBadge';
 import { LiquidityDepthOptimizer } from '@/components/LiquidityDepthOptimizer';
 import { TokenPriceAlertWidget } from '@/components/TokenPriceAlertWidget';
@@ -32,6 +32,8 @@ import { ProjectAuditLog } from '@/components/ProjectAuditLog';
 import { CalendarExportButton } from '@/components/CalendarExportButton';
 import { DownloadReceiptButton } from '@/components/DownloadReceiptButton';
 import { AccountsPayableExportModal } from '@/components/AccountsPayableExportModal';
+import { BulkMilestonePayoutManager } from '@/components/BulkMilestonePayoutManager';
+import { MilestoneCertificateButton } from '@/components/MilestoneCertificateButton';
 import { GasFeeEstimatorWidget } from '@/components/GasFeeEstimatorWidget';
 import { BlendYieldVisualizer } from '@/components/BlendYieldVisualizer';
 import { BLEND_ALLOCATION_RATIO } from '@/lib/blend-yield';
@@ -79,6 +81,10 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
     allowedTabs: ['projects', 'create', 'applicants', 'saved'] as const,
     walletAddress: address,
   });
+  // Search and token filters persisted across navigation (#177)
+  const [projectSearch, setProjectSearch] = usePersistentFilter<string>('client_projects_search', '', address);
+  const [projectToken, setProjectToken] = usePersistentFilter<string>('client_projects_token', 'All', address);
+  const [showBulkPayout, setShowBulkPayout] = useState(false);
   const [loading, setLoading] = useState(true);
   const [lightboxImage, setLightboxImage] = useState<{ url: string; name?: string } | null>(null);
 
@@ -101,6 +107,19 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
 
   // Projects state initialized from backend
   const [projects, setProjects] = useState<Project[]>([]);
+
+  const visibleProjects = React.useMemo(() => {
+    const query = projectSearch.trim().toLowerCase();
+    return projects.filter((project) => {
+      const matchesToken = projectToken === 'All' || (project.token || 'USDC') === projectToken;
+      const matchesSearch =
+        query.length === 0 ||
+        [project.title, project.subtitle, project.description, project.category]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+      return matchesToken && matchesSearch;
+    });
+  }, [projects, projectSearch, projectToken]);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -993,6 +1012,15 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                   <span>📊 AP Export</span>
                 </button>
                 <button
+                  type="button"
+                  data-testid="open-bulk-payout"
+                  onClick={() => setShowBulkPayout(true)}
+                  className="inline-flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-medium text-xs rounded-xl border border-emerald-500/30 transition-all"
+                  title="Approve multiple submitted milestones in one signature"
+                >
+                  <span>⚡ Bulk Payout</span>
+                </button>
+                <button
                   onClick={() => setActiveTab('create')}
                   className="inline-flex items-center space-x-2 px-4 py-2 bg-transparent hover:bg-[#27272a] text-white font-medium text-sm rounded-xl border border-[#3f3f46] transition-all hover:border-[#52525b] shadow-sm active:scale-95"
                 >
@@ -1000,6 +1028,39 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                   <span>Create project</span>
                 </button>
               </div>
+            </div>
+
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="sr-only" htmlFor="client-project-search">
+                Search projects
+              </label>
+              <input
+                id="client-project-search"
+                type="search"
+                value={projectSearch}
+                onChange={(event) => setProjectSearch(event.target.value)}
+                placeholder="Search your projects…"
+                className="flex-1 rounded-xl border border-[#333338] bg-[#232326] px-3.5 py-2 text-sm text-white placeholder-[#71717a] focus:border-blue-500 focus:outline-none"
+              />
+              <label className="sr-only" htmlFor="client-project-token">
+                Filter projects by token
+              </label>
+              <select
+                id="client-project-token"
+                value={projectToken}
+                onChange={(event) => setProjectToken(event.target.value)}
+                className="rounded-xl border border-[#333338] bg-[#232326] px-3.5 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+              >
+                <option value="All">All Tokens</option>
+                {Object.keys(SUPPORTED_TOKENS).map((symbol) => (
+                  <option key={symbol} value={symbol}>
+                    {symbol}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-[#71717a]" data-testid="client-project-filter-count">
+                Showing {visibleProjects.length} of {projects.length}
+              </span>
             </div>
 
             {loading ? (
@@ -1016,9 +1077,15 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                   Create Your First Project
                 </button>
               </div>
+            ) : visibleProjects.length === 0 ? (
+              <div className="rounded-xl border border-[#27272a] bg-[#1c1c20]/50 py-12 text-center">
+                <p className="text-sm text-[#a1a1aa]">
+                  No projects match your search or token filter.
+                </p>
+              </div>
             ) : (
               <div className="space-y-4">
-                {projects.map((proj) => (
+                {visibleProjects.map((proj) => (
                   <div
                     key={proj.id}
                     onClick={() => {
@@ -1143,7 +1210,10 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                         </span>
                       )}
                       {(proj.status === 'completed' || (proj.status as string) === 'Completed') && (
-                        <DownloadReceiptButton project={proj} />
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          <MilestoneCertificateButton project={proj} />
+                          <DownloadReceiptButton project={proj} />
+                        </div>
                       )}
                       <ShareMilestoneButton project={proj} />
                     </div>
@@ -2191,6 +2261,15 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
           setMultisigRequest(null);
           void fetchBackendProjects();
         }}
+      />
+
+      {/* Bulk milestone payout manager (#308) */}
+      <BulkMilestonePayoutManager
+        isOpen={showBulkPayout}
+        onClose={() => setShowBulkPayout(false)}
+        projects={projects}
+        balance={projectToken === 'All' ? null : tokenBalances.balances[projectToken] ?? null}
+        onComplete={() => void fetchBackendProjects()}
       />
 
       {/* Enterprise Accounts Payable Export Modal */}
