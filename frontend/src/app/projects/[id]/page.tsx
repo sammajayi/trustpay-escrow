@@ -42,6 +42,7 @@ import { DeliverableDiffViewer } from '@/components/DeliverableDiffViewer';
 import { SorobanEventStreamDrawer } from '@/components/SorobanEventStreamDrawer';
 import { MilestoneGanttChart } from '@/components/MilestoneGanttChart';
 import { DeliverableChecksums } from '@/components/FileChecksumBadge';
+import { GitRepoMilestoneConnector, GitDeliverableBadge } from '@/components/GitRepoMilestoneConnector';
 import {
   RequestRevisionModal,
   type RevisionRequestPayload,
@@ -1114,16 +1115,19 @@ export default function ProjectDetailsPage() {
                       )}
 
                       {m.deliverable_url && (
-                        <div className="pl-10 pt-0.5 text-xs text-indigo-400 flex items-center gap-2">
-                          <span className="text-slate-500 font-medium">Deliverable Link:</span>
-                          <a
-                            href={m.deliverable_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="underline hover:text-indigo-300 truncate max-w-xs font-mono text-[11px]"
-                          >
-                            {m.deliverable_url}
-                          </a>
+                        <div className="pl-10 pt-1 flex flex-wrap items-center gap-2">
+                          <div className="text-xs text-indigo-400 flex items-center gap-2">
+                            <span className="text-slate-500 font-medium">Deliverable Link:</span>
+                            <a
+                              href={m.deliverable_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:text-indigo-300 truncate max-w-xs font-mono text-[11px]"
+                            >
+                              {m.deliverable_url}
+                            </a>
+                          </div>
+                          <GitDeliverableBadge url={m.deliverable_url} commitHash={m.deliverable_hash} />
                         </div>
                       )}
 
@@ -1283,13 +1287,14 @@ export default function ProjectDetailsPage() {
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1.5">Deliverable URL / Repository PR / IPFS Gateway</label>
-                <input
-                  type="text"
-                  value={deliverableUrl}
-                  onChange={(e) => setDeliverableUrl(e.target.value)}
-                  placeholder="https://github.com/organization/repo/pull/1 or https://ipfs.io/ipfs/..."
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500"
+                <GitRepoMilestoneConnector
+                  initialUrl={deliverableUrl}
+                  onConnectorChange={({ url, metadata, isValid }) => {
+                    setDeliverableUrl(url);
+                    if (isValid && metadata) {
+                      setDeliverableHash(metadata.latestCommitHash);
+                    }
+                  }}
                 />
               </div>
 

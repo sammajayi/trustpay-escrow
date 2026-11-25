@@ -27,6 +27,7 @@ import {
 } from '@/components/ProposalCounterOfferModal';
 import type { CounterOffer } from '@/lib/counter-offer';
 import { TaxExportModal } from '@/components/TaxExportModal';
+import { CurrencyConverterWidget } from '@/components/CurrencyConverterWidget';
 
 export function FreelancerDashboard() {
   const router = useRouter();
@@ -553,6 +554,7 @@ export function FreelancerDashboard() {
           </div>
 
           <div className="flex items-center gap-2">
+          <CurrencyConverterWidget portfolioItems={projects.map((p) => ({ amount: p.budget || 0, token: p.token || 'USDC' }))} />
           <button
             onClick={() => setShowTaxExport(true)}
             className="px-3 py-2 rounded-xl text-xs font-semibold bg-[#18181b] border border-[#27272a] text-[#e4e4e7] hover:bg-[#27272a] transition-all"

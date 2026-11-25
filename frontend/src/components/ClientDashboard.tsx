@@ -993,6 +993,7 @@ export function ClientDashboard({ defaultTab = 'projects' }: ClientDashboardProp
                 <NumberRoll value={projects.length} /> <span>{projects.length === 1 ? 'project' : 'projects'}</span>
               </h2>
               <div className="flex items-center gap-2">
+                <CurrencyConverterWidget portfolioItems={projects.map((p) => ({ amount: p.budget || 0, token: p.token || 'USDC' }))} />
                 {(isMultisig || accountPendingMultisig.length > 0) && (
                   <button
                     type="button"
